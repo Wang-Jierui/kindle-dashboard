@@ -1,0 +1,6 @@
+/.toolchain/
+/client/target/
+/dist/
+/server/published/
+/.secrets/
+__pycache__/

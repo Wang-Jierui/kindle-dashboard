@@ -1,0 +1,475 @@
+export struct BlockView {
+    kind: int,
+    left: float,
+    top: float,
+    block-width: float,
+    block-height: float,
+    label: string,
+    font-pixels: int,
+    alignment: int,
+    single-line: bool,
+    picture: image,
+    picture-ready: bool,
+    crop: bool,
+    primary: bool,
+    button-id: string,
+    action: string,
+    target-page: string,
+}
+
+component FeedLabel inherits Text {
+    font-family: "Noto Sans SC";
+    color: #000;
+    overflow: elide;
+} 
+
+component PanelButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> latched: false;
+    in property <bool> accepts-input: true;
+    in property <bool> primary: false;
+    in property <string> label-font: "Atkinson Hyperlegible";
+    private property <bool> highlighted: root.latched || (root.primary ? !hit.pressed : hit.pressed);
+    callback clicked;
+    min-height: 66px;
+    border-width: 2px;
+    border-color: #000;
+    background: root.highlighted ? #000 : #fff;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => {
+        if root.accepts-input { root.clicked(); }
+    }
+
+    Text {
+        text: root.label;
+        font-family: root.label-font;
+        overflow: elide;
+        color: root.highlighted ? #fff : #000;
+        font-size: 23px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    hit := TouchArea {
+        enabled: root.accepts-input;
+        clicked => { root.clicked(); }
+    }
+}
+
+component SettingTitle inherits Text {
+    font-family: "Noto Sans SC";
+    font-size: 25px;
+    color: #000;
+}
+
+component SettingDetail inherits Text {
+    font-family: "Noto Sans SC";
+    font-size: 20px;
+    color: #000;
+    wrap: word-wrap;
+}
+
+component SettingButton inherits PanelButton {
+    label-font: "Noto Sans SC";
+}
+
+component TouchKeyboard inherits VerticalLayout {
+    in property <bool> uppercase;
+    callback key(string);
+    callback shift;
+    spacing: 9px;
+
+    HorizontalLayout {
+        spacing: 7px;
+        for key in ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"]: PanelButton {
+            label: key;
+            clicked => { root.key(key); }
+        }
+    }
+    HorizontalLayout {
+        spacing: 7px;
+        for key in root.uppercase ? ["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"] : ["q", "w", "e", "r", "t", "y", "u", "i", "o", "p"]: PanelButton {
+            label: key;
+            clicked => { root.key(key); }
+        }
+    }
+    HorizontalLayout {
+        spacing: 7px;
+        for key in root.uppercase ? ["A", "S", "D", "F", "G", "H", "J", "K", "L"] : ["a", "s", "d", "f", "g", "h", "j", "k", "l"]: PanelButton {
+            label: key;
+            clicked => { root.key(key); }
+        }
+    }
+    HorizontalLayout {
+        spacing: 7px;
+        PanelButton {
+            label: root.uppercase ? "ABC" : "abc";
+            latched: root.uppercase;
+            clicked => { root.shift(); }
+        }
+        for key in root.uppercase ? ["Z", "X", "C", "V", "B", "N", "M"] : ["z", "x", "c", "v", "b", "n", "m"]: PanelButton {
+            label: key;
+            clicked => { root.key(key); }
+        }
+        PanelButton {
+            label: "退格";
+            label-font: "Noto Sans SC";
+            clicked => { root.key("backspace"); }
+        }
+    }
+    HorizontalLayout {
+        spacing: 7px;
+        for key in [".", ":", "/", "-", "_", "~", "[", "]", "%"]: PanelButton {
+            label: key;
+            clicked => { root.key(key); }
+        }
+        PanelButton { label: "清空"; label-font: "Noto Sans SC"; clicked => { root.key("clear"); } }
+    }
+}
+
+export component Dashboard inherits Window {
+    title: "Kindle Dashboard";
+    background: #fff;
+    default-font-family: "Atkinson Hyperlegible";
+    default-font-size: 24px;
+    preferred-width: 758px;
+    preferred-height: 1024px;
+    callback exit-requested;
+    callback open-settings;
+    callback adjust-brightness(int);
+    callback toggle-wifi;
+    callback reconnect-wifi;
+    callback toggle-auto-sleep;
+    callback adjust-idle(int);
+    callback select-wake-plan(int);
+    callback toggle-quiet-hours;
+    callback sleep-now;
+    callback activate-block(string, string, string);
+    callback refresh-due;
+    callback edit-server;
+    callback type-server-key(string);
+    callback save-server;
+    in-out property <bool> settings-open: false;
+    in-out property <bool> exiting: false;
+    in property <bool> standby: false;
+    in property <string> power-status: "自动休眠已关闭";
+    in property <int> brightness;
+    in property <int> brightness-max;
+    in property <bool> wifi-available;
+    in property <bool> wifi-on;
+    in property <string> wifi-status: "不可用";
+    in property <string> device-feedback;
+    in property <bool> sleep-settings-available;
+    in property <bool> sleep-now-available;
+    in property <bool> auto-sleep;
+    in property <int> idle-seconds: 25;
+    in property <int> wake-plan: 1;
+    in property <string> wake-label: "每 30 分钟";
+    in property <bool> quiet-hours;
+    in property <string> sleep-feedback;
+    in property <[BlockView]> blocks;
+    in property <float> document-height;
+    out property <float> document-width: max(1, (root.width - 92px) / 1px);
+    in-out property <length> document-offset;
+    in property <bool> loading-content;
+    in property <string> refreshing-button;
+    in property <string> status-clock: "—";
+    in property <string> status-power: "";
+    in property <string> status-update: "尚未更新";
+    in property <string> refresh-notice;
+    in property <string> server-address;
+    in-out property <bool> server-editor-open;
+    in-out property <string> server-url-draft;
+    in-out property <string> server-key-draft;
+    in-out property <int> server-field;
+    in-out property <bool> keyboard-uppercase;
+    in-out property <bool> reveal-server-key;
+    in property <string> masked-server-key;
+    in property <string> server-feedback;
+
+    VerticalLayout {
+        padding: 46px;
+        spacing: 20px;
+
+        if !root.settings-open: VerticalLayout {
+            spacing: 16px;
+
+            HorizontalLayout {
+                height: 68px;
+                spacing: 14px;
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    spacing: 2px;
+                    FeedLabel {
+                        text: root.standby ? "休眠中 · " + root.status-update
+                            : root.status-clock + root.status-power + " · " + root.status-update;
+                        font-size: 23px;
+                        vertical-alignment: center;
+                        vertical-stretch: 1;
+                    }
+                    if !root.standby && root.refresh-notice != "": FeedLabel {
+                        text: root.refresh-notice;
+                        font-size: 19px;
+                        height: 27px;
+                        vertical-alignment: center;
+                    }
+                }
+                if !root.standby: PanelButton {
+                    label: "设置";
+                    label-font: "Noto Sans SC";
+                    width: 126px;
+                    clicked => {
+                        root.settings-open = true;
+                        root.server-editor-open = false;
+                        root.open-settings();
+                    }
+                }
+            }
+            Rectangle { height: 2px; background: #000; }
+
+            Flickable {
+                vertical-stretch: 1;
+                interactive: !root.standby;
+                content-width: self.width;
+                content-height: max(self.height, root.document-height * 1px);
+                content-y <=> root.document-offset;
+                for block in root.blocks: Rectangle {
+                    x: block.left * 1px;
+                    y: block.top * 1px;
+                    width: block.block-width * 1px;
+                    height: block.block-height * 1px;
+                    clip: true;
+
+                    if block.kind == 0: FeedLabel {
+                        width: parent.width;
+                        height: parent.height;
+                        text: block.label;
+                        font-size: block.font-pixels * 1px;
+                        wrap: block.single-line ? no-wrap : word-wrap;
+                        horizontal-alignment: block.alignment == 1 ? center : block.alignment == 2 ? right : left;
+                    }
+                    if block.kind == 1 && block.picture-ready: Image {
+                        width: parent.width;
+                        height: parent.height;
+                        source: block.picture;
+                        image-fit: block.crop ? ImageFit.cover : ImageFit.contain;
+                    }
+                    if block.kind == 1 && !block.picture-ready: Rectangle {
+                        width: parent.width;
+                        height: parent.height;
+                        border-width: 1px;
+                        border-color: #000;
+                        FeedLabel {
+                            x: 8px;
+                            y: 8px;
+                            width: parent.width - 16px;
+                            height: parent.height - 16px;
+                            text: block.label;
+                            wrap: word-wrap;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                    if block.kind == 2: PanelButton {
+                        width: parent.width;
+                        height: parent.height;
+                        label-font: "Noto Sans SC";
+                        label: root.loading-content && root.refreshing-button == block.button-id
+                            ? "刷新中…" : block.label;
+                        latched: root.loading-content && root.refreshing-button == block.button-id;
+                        primary: block.primary;
+                        accepts-input: !root.standby && (block.action != "refresh" || !root.loading-content);
+                        clicked => { root.activate-block(block.action, block.target-page, block.button-id); }
+                    }
+                }
+            }
+        }
+
+        if root.settings-open && root.server-editor-open: VerticalLayout {
+            spacing: 15px;
+            FeedLabel { text: "服务器连接"; font-size: 44px; }
+            Rectangle { height: 2px; background: #000; }
+            FeedLabel { text: "地址"; font-size: 26px; }
+            PanelButton {
+                label-font: "Noto Sans SC";
+                label: root.server-url-draft == "" ? "输入 IP、域名或 URL" : root.server-url-draft;
+                latched: root.server-field == 0;
+                clicked => { root.server-field = 0; }
+            }
+            FeedLabel { text: "密钥"; font-size: 26px; }
+            HorizontalLayout {
+                spacing: 12px;
+                PanelButton {
+                    label-font: "Noto Sans SC";
+                    label: root.server-key-draft == "" ? "未设置（可留空）"
+                        : root.reveal-server-key ? root.server-key-draft : root.masked-server-key;
+                    latched: root.server-field == 1;
+                    horizontal-stretch: 1;
+                    clicked => { root.server-field = 1; }
+                }
+                PanelButton {
+                    label-font: "Noto Sans SC";
+                    label: root.reveal-server-key ? "隐藏" : "显示";
+                    width: 116px;
+                    clicked => { root.reveal-server-key = !root.reveal-server-key; }
+                }
+            }
+            TouchKeyboard {
+                uppercase: root.keyboard-uppercase;
+                key(value) => { root.type-server-key(value); }
+                shift => { root.keyboard-uppercase = !root.keyboard-uppercase; }
+            }
+            if root.server-feedback != "": FeedLabel {
+                text: root.server-feedback;
+                font-size: 23px;
+                min-height: 45px;
+                wrap: word-wrap;
+                vertical-alignment: center;
+            }
+            Rectangle { vertical-stretch: 1; }
+            PanelButton {
+                label-font: "Noto Sans SC";
+                label: "保存并连接";
+                primary: true;
+                accepts-input: !root.loading-content && !root.exiting;
+                clicked => { root.save-server(); }
+            }
+            PanelButton {
+                label-font: "Noto Sans SC";
+                label: "返回设置";
+                clicked => {
+                    root.server-key-draft = "";
+                    root.reveal-server-key = false;
+                    root.server-editor-open = false;
+                }
+            }
+        }
+
+        if root.settings-open && !root.server-editor-open: VerticalLayout {
+            spacing: 12px;
+            SettingTitle { text: "设置"; font-size: 52px; }
+            Rectangle { height: 2px; background: #000; }
+
+            SettingTitle { text: "前光亮度"; }
+            if root.brightness-max <= 0: SettingDetail { text: "前光不可用"; }
+            if root.brightness-max > 0: HorizontalLayout {
+                spacing: 12px;
+                PanelButton {
+                    label: "−";
+                    width: 80px;
+                    accepts-input: !root.exiting && root.brightness > 0;
+                    clicked => { root.adjust-brightness(-1); }
+                }
+                SettingDetail {
+                    text: root.brightness + " / " + root.brightness-max;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+                PanelButton {
+                    label: "+";
+                    width: 80px;
+                    accepts-input: !root.exiting && root.brightness < root.brightness-max;
+                    clicked => { root.adjust-brightness(1); }
+                }
+            }
+            Rectangle { height: 1px; background: #000; }
+
+            SettingTitle { text: "无线网络（Wi-Fi）"; }
+            SettingDetail { text: root.wifi-status; }
+            if root.wifi-available: HorizontalLayout {
+                spacing: 12px;
+                SettingButton {
+                    label: root.wifi-on ? "关闭 Wi-Fi" : "开启 Wi-Fi";
+                    accepts-input: !root.exiting;
+                    clicked => { root.toggle-wifi(); }
+                }
+                if root.wifi-on: SettingButton {
+                    label: "重新连接";
+                    accepts-input: !root.exiting;
+                    clicked => { root.reconnect-wifi(); }
+                }
+            }
+            if root.device-feedback != "": SettingDetail { text: root.device-feedback; }
+            if root.server-address != "": SettingDetail { text: root.server-address; }
+            SettingButton {
+                label: "服务器连接";
+                accepts-input: !root.exiting;
+                clicked => { root.edit-server(); }
+            }
+            Rectangle { height: 1px; background: #000; }
+
+            SettingTitle { text: "休眠与唤醒"; }
+            SettingDetail { text: root.power-status; }
+            if root.sleep-settings-available: VerticalLayout {
+                spacing: 10px;
+                HorizontalLayout {
+                    spacing: 12px;
+                    SettingButton {
+                        label: root.auto-sleep ? "自动休眠：开" : "自动休眠：关";
+                        accepts-input: !root.exiting;
+                        clicked => { root.toggle-auto-sleep(); }
+                    }
+                    if root.sleep-now-available: SettingButton {
+                        label: "立即休眠";
+                        accepts-input: !root.exiting;
+                        clicked => { root.sleep-now(); }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 12px;
+                    PanelButton {
+                        label: "−";
+                        width: 80px;
+                        accepts-input: !root.exiting && root.idle-seconds > 15;
+                        clicked => { root.adjust-idle(-5); }
+                    }
+                    SettingDetail {
+                        text: "闲置等待 · " + root.idle-seconds + " 秒";
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    PanelButton {
+                        label: "+";
+                        width: 80px;
+                        accepts-input: !root.exiting && root.idle-seconds < 120;
+                        clicked => { root.adjust-idle(5); }
+                    }
+                }
+                SettingDetail { text: "唤醒计划 · " + root.wake-label; }
+                HorizontalLayout {
+                    spacing: 8px;
+                    for option[index] in ["15 分钟", "30 分钟", "60 分钟", "每个整点"]: SettingButton {
+                        label: option;
+                        latched: root.wake-plan == index;
+                        accepts-input: !root.exiting && root.wake-plan != index;
+                        clicked => { root.select-wake-plan(index); }
+                    }
+                }
+                SettingButton {
+                    label: root.quiet-hours ? "夜间免打扰 00:00–07:00：开" : "夜间免打扰 00:00–07:00：关";
+                    accepts-input: !root.exiting;
+                    clicked => { root.toggle-quiet-hours(); }
+                }
+                if root.sleep-feedback != "": SettingDetail { text: root.sleep-feedback; }
+            }
+            Rectangle { vertical-stretch: 1; }
+            SettingButton {
+                label: "返回信息页";
+                accepts-input: !root.exiting;
+                clicked => { root.settings-open = false; }
+            }
+            SettingButton {
+                label: root.exiting ? "正在退出…" : "退出回书库";
+                latched: root.exiting;
+                accepts-input: !root.exiting;
+                clicked => {
+                    root.exiting = true;
+                    root.exit-requested();
+                }
+            }
+        }
+    }
+}

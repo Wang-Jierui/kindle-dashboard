@@ -1,0 +1,173 @@
+{
+  "schema_version": 1,
+  "diagram_type": "lifecycle",
+  "meta": {
+    "title": "KPW4 信息面板客户端状态图",
+    "locale": "zh-CN",
+    "viewBox": [
+      1080,
+      660
+    ],
+    "quality_profile": "showcase"
+  },
+  "lanes": [
+    {
+      "id": "main",
+      "label": "运行状态"
+    },
+    {
+      "id": "events",
+      "label": "恢复路径"
+    }
+  ],
+  "states": [
+    {
+      "id": "library",
+      "type": "start",
+      "label": "原生书库",
+      "sublabel": "点击 Scriptlet",
+      "lane": "main",
+      "col": 0
+    },
+    {
+      "id": "takeover",
+      "type": "active",
+      "label": "接管中",
+      "sublabel": "检查环境并启动",
+      "lane": "main",
+      "col": 1
+    },
+    {
+      "id": "awake",
+      "type": "active",
+      "label": "清醒",
+      "sublabel": "电池 / 插电常驻",
+      "lane": "main",
+      "col": 2
+    },
+    {
+      "id": "prepare",
+      "type": "decision",
+      "label": "准备挂起",
+      "sublabel": "静态帧与 RTC",
+      "lane": "main",
+      "col": 3
+    },
+    {
+      "id": "suspended",
+      "type": "waiting",
+      "label": "已挂起",
+      "sublabel": "保持墨水屏画面",
+      "lane": "main",
+      "col": 4
+    },
+    {
+      "id": "restore",
+      "type": "success",
+      "label": "恢复书库",
+      "sublabel": "启动器回滚",
+      "lane": "events",
+      "col": 0
+    },
+    {
+      "id": "abort",
+      "type": "failure",
+      "label": "取消或失败",
+      "sublabel": "撤销本轮休眠",
+      "lane": "events",
+      "col": 1
+    },
+    {
+      "id": "resume",
+      "type": "active",
+      "label": "恢复中",
+      "sublabel": "重新读取供电",
+      "lane": "events",
+      "col": 2
+    }
+  ],
+  "transitions": [
+    {
+      "from": "awake",
+      "to": "restore",
+      "label": "退出或崩溃",
+      "labelAt": [
+        402,
+        230
+      ]
+    },
+    {
+      "from": "prepare",
+      "to": "abort",
+      "label": "取消或出错",
+      "variant": "security",
+      "labelAt": [
+        556,
+        230
+      ]
+    },
+    {
+      "from": "abort",
+      "to": "awake",
+      "label": "撤销待机",
+      "variant": "emphasis"
+    },
+    {
+      "from": "suspended",
+      "to": "resume",
+      "label": "硬件唤醒",
+      "labelAt": [
+        710,
+        230
+      ]
+    },
+    {
+      "from": "resume",
+      "to": "awake",
+      "label": "重算计划",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "via": [
+        [
+          710,
+          396
+        ],
+        [
+          807,
+          396
+        ],
+        [
+          807,
+          92
+        ],
+        [
+          402,
+          92
+        ]
+      ],
+      "labelAt": [
+        608,
+        82
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "清醒与睡眠",
+      "items": [
+        "电池模式按闲置期限进入准备挂起。",
+        "插电常驻取消挂起，前光独立控制。"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "退回书库",
+      "items": [
+        "启动器处理退出、崩溃及接管失败。",
+        "恢复原生服务并确认书库可操作。"
+      ]
+    }
+  ]
+}

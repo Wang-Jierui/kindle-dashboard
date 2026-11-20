@@ -11,7 +11,7 @@ use slint::{ComponentHandle, Timer, TimerMode};
 use slint_backend_kindle::KindleBackend;
 
 use crate::Dashboard;
-use crate::schedule::{Schedule, WakePlan, local};
+use crate::schedule::{CronPlan, Schedule, WakePlan, idle_duration, local};
 use crate::settings::command;
 
 const RETRY_DELAY: Duration = Duration::from_secs(60);
@@ -149,6 +149,7 @@ struct State {
     supply: Supply,
     idle_until: Instant,
     retry_at: Instant,
+    last_epoch: u64,
     next_wake: u64,
     preview: Option<(u64, Option<(u64, String)>)>,
     failures: u8,
@@ -158,21 +159,67 @@ struct State {
 
 enum Change {
     Enabled,
-    Idle(i32),
+    Idle(u64),
     Plan(WakePlan),
     QuietHours,
 }
 
-fn show_schedule(window: &Dashboard, schedule: Schedule) {
+fn show_schedule(window: &Dashboard, schedule: &Schedule) {
     window.set_auto_sleep(schedule.enabled);
-    window.set_idle_seconds(schedule.idle as i32);
+    window.set_idle_label(format!("{} 分 {} 秒", schedule.idle / 60, schedule.idle % 60).into());
     window.set_wake_plan(schedule.plan.code());
     window.set_quiet_hours(schedule.quiet_hours);
-    window.set_wake_label(match schedule.plan {
+    window.set_wake_label(match &schedule.plan {
         WakePlan::Period(period) if period % 60 == 0 => format!("每 {} 分钟", period / 60),
         WakePlan::Period(period) => format!("每 {period} 秒"),
         WakePlan::Hourly => "每个整点".to_owned(),
+        WakePlan::Cron(_) => "自定义 Cron".to_owned(),
     }.into());
+}
+
+fn cron_draft(window: &Dashboard, schedule: &Schedule) -> Option<WakePlan> {
+    window.set_cron_preview("".into());
+    window.set_cron_feedback("".into());
+    let plan = match CronPlan::parse(window.get_cron_expression_draft().as_str()) {
+        Ok(plan) => WakePlan::Cron(Rc::new(plan)),
+        Err(error) => {
+            window.set_cron_feedback(error.to_string().into());
+            return None;
+        }
+    };
+    let preview = Schedule { plan: plan.clone(), ..schedule.clone() };
+    let labels = epoch_now().map(|now| preview.upcoming(now)).unwrap_or_default()
+        .into_iter().filter_map(|epoch| local(epoch).map(|time| time.label)).collect::<Vec<_>>();
+    if labels.is_empty() {
+        window.set_cron_feedback("无法计算下次唤醒，请检查计划和设备时间".into());
+        return None;
+    }
+    window.set_cron_preview(labels.join("\n").into());
+    Some(plan)
+}
+
+fn type_idle_key(window: &Dashboard, key: &str) {
+    let editing_seconds = window.get_idle_edit_seconds();
+    let mut value = if editing_seconds {
+        window.get_idle_seconds_draft().to_string()
+    } else {
+        window.get_idle_minutes_draft().to_string()
+    };
+    if window.get_idle_replace_field() {
+        value.clear();
+    }
+    match key.as_bytes() {
+        [digit @ b'0'..=b'9'] if value.len() < 2 => value.push(char::from(*digit)),
+        b"backspace" => { value.pop(); }
+        _ => return,
+    }
+    if editing_seconds {
+        window.set_idle_seconds_draft(value.into());
+    } else {
+        window.set_idle_minutes_draft(value.into());
+    }
+    window.set_idle_replace_field(false);
+    window.set_idle_feedback("".into());
 }
 
 pub fn start(window: &Dashboard, backend: Rc<KindleBackend>) -> Timer {
@@ -194,52 +241,135 @@ pub fn start(window: &Dashboard, backend: Rc<KindleBackend>) -> Timer {
     let now = Instant::now();
     let epoch = epoch_now().unwrap_or(0);
     let state = Rc::new(RefCell::new(State {
-        schedule,
+        schedule: schedule.clone(),
         supply: Supply::Unknown,
         idle_until: now + Duration::from_secs(schedule.idle),
         retry_at: now,
-        next_wake: schedule.plan.nominal(epoch, epoch, 0).unwrap_or(0),
+        last_epoch: epoch,
+        next_wake: schedule.plan.nominal(epoch, 0).unwrap_or(0),
         preview: None,
         failures: 0,
         pending_frame: false,
         sleep_now: false,
     }));
     window.set_sleep_settings_available(true);
-    show_schedule(window, schedule);
+    show_schedule(window, &schedule);
 
     let page = window.as_weak();
     let preferences = state.clone();
     let apply = Rc::new(move |change: Change| {
         let Some(window) = page.upgrade() else { return };
         let mut status = preferences.borrow_mut();
-        let mut schedule = status.schedule;
+        let mut schedule = status.schedule.clone();
+        let saving_idle = matches!(change, Change::Idle(_));
+        let saving_cron = matches!(change, Change::Plan(WakePlan::Cron(_)));
         match change {
             Change::Enabled => schedule.enabled = !schedule.enabled,
-            Change::Idle(delta) => schedule.idle = (schedule.idle as i32 + delta.clamp(-5, 5)).clamp(15, 120) as u64,
+            Change::Idle(seconds) => schedule.idle = seconds,
             Change::Plan(value) => schedule.plan = value,
             Change::QuietHours => schedule.quiet_hours = !schedule.quiet_hours,
         }
         if let Err(error) = schedule.save(&root) {
             eprintln!("[auto-sleep] could not save settings: {error}");
-            window.set_sleep_feedback("无法保存休眠设置".into());
+            if saving_idle {
+                window.set_idle_feedback("无法保存休眠设置".into());
+            } else if saving_cron {
+                window.set_cron_feedback("无法保存唤醒计划".into());
+            } else {
+                window.set_sleep_feedback("无法保存休眠设置".into());
+            }
             return;
         }
         if schedule.plan != status.schedule.plan {
-            let epoch = epoch_now().unwrap_or(0);
-            status.next_wake = schedule.plan.nominal(epoch, epoch, 0).unwrap_or(0);
+            status.next_wake = 0;
         }
+        show_schedule(&window, &schedule);
         status.schedule = schedule;
         status.preview = None;
-        status.idle_until = Instant::now() + Duration::from_secs(schedule.idle);
+        status.idle_until = Instant::now() + Duration::from_secs(status.schedule.idle);
         status.retry_at = Instant::now();
         status.failures = 0;
-        show_schedule(&window, schedule);
         window.set_sleep_feedback("".into());
+        if saving_idle {
+            window.set_idle_editor_open(false);
+        }
+        if saving_cron {
+            window.set_cron_editor_open(false);
+        }
     });
     let update = apply.clone();
     window.on_toggle_auto_sleep(move || update(Change::Enabled));
+    let page = window.as_weak();
+    let preferences = state.clone();
+    window.on_edit_idle(move || {
+        let Some(window) = page.upgrade() else { return };
+        let seconds = preferences.borrow().schedule.idle;
+        window.set_idle_minutes_draft((seconds / 60).to_string().into());
+        window.set_idle_seconds_draft(format!("{:02}", seconds % 60).into());
+        window.set_idle_edit_seconds(seconds < 60);
+        window.set_idle_replace_field(true);
+        window.set_idle_feedback("".into());
+        window.set_idle_editor_open(true);
+    });
+    let page = window.as_weak();
+    window.on_type_idle_key(move |key| {
+        if let Some(window) = page.upgrade() {
+            type_idle_key(&window, key.as_str());
+        }
+    });
+    let page = window.as_weak();
     let update = apply.clone();
-    window.on_adjust_idle(move |delta| update(Change::Idle(delta)));
+    window.on_save_idle(move || {
+        let Some(window) = page.upgrade() else { return };
+        match idle_duration(window.get_idle_minutes_draft().as_str(), window.get_idle_seconds_draft().as_str()) {
+            Some(seconds) => update(Change::Idle(seconds)),
+            None => window.set_idle_feedback("总时长至少 15 秒，秒数须为 0–59".into()),
+        }
+    });
+    let page = window.as_weak();
+    let preferences = state.clone();
+    window.on_edit_cron(move || {
+        let Some(window) = page.upgrade() else { return };
+        let status = preferences.borrow();
+        let expression = match &status.schedule.plan {
+            WakePlan::Cron(plan) => plan.expression.as_str(),
+            _ => "10 * * * *",
+        };
+        window.set_cron_expression_draft(expression.into());
+        window.set_cron_editor_open(true);
+        cron_draft(&window, &status.schedule);
+    });
+    let page = window.as_weak();
+    window.on_type_cron_key(move |key| {
+        let Some(window) = page.upgrade() else { return };
+        let mut input = window.get_cron_expression_draft().to_string();
+        match key.as_str() {
+            "clear" => input.clear(),
+            "backspace" => { input.pop(); }
+            key if input.len() < 192 => input.push_str(key),
+            _ => return,
+        }
+        window.set_cron_expression_draft(input.into());
+        window.set_cron_feedback("".into());
+        window.set_cron_preview("".into());
+    });
+    let page = window.as_weak();
+    let preferences = state.clone();
+    window.on_preview_cron(move || {
+        if let Some(window) = page.upgrade() {
+            cron_draft(&window, &preferences.borrow().schedule);
+        }
+    });
+    let page = window.as_weak();
+    let preferences = state.clone();
+    let update = apply.clone();
+    window.on_save_cron(move || {
+        let Some(window) = page.upgrade() else { return };
+        let choice = cron_draft(&window, &preferences.borrow().schedule);
+        if let Some(plan) = choice {
+            update(Change::Plan(plan));
+        }
+    });
     let update = apply.clone();
     window.on_select_wake_plan(move |code| {
         if let Some(plan) = WakePlan::from_code(code) {
@@ -260,7 +390,7 @@ pub fn start(window: &Dashboard, backend: Rc<KindleBackend>) -> Timer {
     timer.start(TimerMode::Repeated, Duration::from_millis(500), move || {
         let Some(window) = window.upgrade() else { return };
         let mut status = state.borrow_mut();
-        let schedule = status.schedule;
+        let schedule = status.schedule.clone();
         let supply = hardware.supply();
         let now = Instant::now();
         if supply != status.supply {
@@ -274,8 +404,10 @@ pub fn start(window: &Dashboard, backend: Rc<KindleBackend>) -> Timer {
             eprintln!("[auto-sleep] power: {name}");
         }
         let Ok(epoch) = epoch_now() else { return };
-        let next_wake = if status.next_wake == 0 || status.next_wake > epoch + 3600 {
-            schedule.plan.nominal(epoch, epoch, 0)
+        let clock_went_back = epoch < status.last_epoch;
+        status.last_epoch = epoch;
+        let next_wake = if status.next_wake == 0 || clock_went_back {
+            schedule.plan.nominal(epoch, 0)
         } else {
             Some(status.next_wake)
         };
@@ -299,7 +431,7 @@ pub fn start(window: &Dashboard, backend: Rc<KindleBackend>) -> Timer {
         };
         let target = *target;
         if target <= epoch {
-            status.next_wake = schedule.plan.nominal(epoch, epoch, next_wake).unwrap_or(0);
+            status.next_wake = schedule.plan.nominal(epoch, next_wake).unwrap_or(0);
             status.preview = None;
             drop(status);
             if !window.get_standby() && !window.get_exiting() {
@@ -333,6 +465,8 @@ pub fn start(window: &Dashboard, backend: Rc<KindleBackend>) -> Timer {
         }
         status.pending_frame = true;
         drop(status);
+        window.set_idle_editor_open(false);
+        window.set_cron_editor_open(false);
         window.set_settings_open(false);
         window.set_standby(true);
 
@@ -352,7 +486,18 @@ pub fn start(window: &Dashboard, backend: Rc<KindleBackend>) -> Timer {
             status.pending_frame = false;
             status.idle_until = Instant::now() + Duration::from_secs(status.schedule.idle);
             match outcome {
-                Ok(()) => status.failures = 0,
+                Ok(()) => {
+                    status.failures = 0;
+                    if let Ok(epoch) = epoch_now() {
+                        if epoch >= target {
+                            status.next_wake = status.schedule.plan.nominal(epoch, status.next_wake).unwrap_or(0);
+                            status.preview = None;
+                        }
+                        status.last_epoch = epoch;
+                    }
+                    drop(status);
+                    window.invoke_refresh_due();
+                }
                 Err(error) if error.kind() == ErrorKind::Interrupted => {}
                 Err(error) => {
                     eprintln!("[auto-sleep] {error}");

@@ -35,7 +35,21 @@ Kindle 优先显示最后一次成功发布的本地缓存。服务端通过 `ET
 
 - **前光亮度**读取当前档位，使用两侧按钮逐档调节。KPW4 的范围为 0–24。
 - **Wi-Fi** 显示开关、连接状态与 IPv4 地址，可切换 Wi-Fi，也可让 Kindle 重连已保存的网络。
-- **休眠与唤醒**支持开关自动休眠、调整 15–120 秒闲置时间，选择 15 / 30 / 60 分钟或本地整点唤醒。可开启本地时间 00:00–07:00 免打扰，这段时间内的 RTC 唤醒顺延到 07:00。电池供电时也可点 **立即休眠**。
+- **休眠与唤醒**支持开关自动休眠。点 **闲置休眠**可分别输入分钟和秒，支持 15 秒到 99 分 59 秒。唤醒计划可选 15 / 30 / 60 分钟、本地整点或自定义 Cron。可开启本地时间 00:00–07:00 免打扰，这段时间内的 RTC 唤醒顺延到 07:00。电池供电时也可点 **立即休眠**。
+- 信息页的 **更新** 位于 **设置** 旁边，点击后立即由 Kindle 拉取。电池模式下从休眠恢复后自动拉取，插电保持清醒时按唤醒计划到点拉取。
+
+### 自定义唤醒时间
+
+在 **设置 → 休眠与唤醒 → 自定义 Cron** 中输入规则，点 **预览** 查看按 Kindle 本地时间计算的接下来三次唤醒，再点 **保存计划**。规则有五个字段，依次是 `分钟 小时 日 月 星期`。支持数字、`*`、逗号列表、范围和步长。星期日可以写 `0` 或 `7`。
+
+| 表达式 | 效果 |
+| --- | --- |
+| `10 * * * *` | 每小时第 10 分钟 |
+| `10,40 * * * *` | 每小时第 10 和第 40 分钟 |
+| `10 8-18 * * 1-5` | 周一至周五的 08:10 到 18:10，每小时一次 |
+| `10 8 * * 1-5; 40 18 * * 1-5` | 周一至周五的 08:10 和 18:40 |
+
+用 `;` 分隔最多四条规则。多条规则落在同一分钟只拉取一次。日期与星期都限定时，任一匹配即可。分钟字段的 `*/45` 匹配每小时的 `:00` 和 `:45`。启用免打扰时，预览会反映顺延到 07:00 的结果。旧版 `sleep-settings` 会继续读取，启用 Cron 后才写入新版配置。
 
 前光和 Wi-Fi 开关只在面板会话内改变，退出时恢复原值。休眠设置保存在 Kindle 的 `/mnt/us/kindle-dashboard/sleep-settings`，修改后立即应用。没有此文件的设备沿用旧版 `auto-sleep` 和 `wake-seconds` 配置。
 
@@ -43,13 +57,15 @@ Kindle 优先显示最后一次成功发布的本地缓存。服务端通过 `ET
 
 ## 构建与复制
 
-安装 Rust 1.92+、Zig 和 `cargo-zigbuild`，再运行下列命令。Windows 的 GNU 主机工具链还需要能链接主机侧 Rust 构建脚本的 MinGW 工具链。
+安装 Rust 1.92+、Zig、`cargo-zigbuild` 和 Python 3，再运行下列命令。Windows 的 GNU 主机工具链还需要能链接主机侧 Rust 构建脚本的 MinGW 工具链。Windows 上可用 `python` 代替 `python3`。
 
-```powershell
+```sh
 rustup target add armv7-unknown-linux-musleabihf
 cargo zigbuild --manifest-path client/Cargo.toml --locked --release --target armv7-unknown-linux-musleabihf
-./tools/package.ps1
+python3 tools/package.py
 ```
+
+打包脚本只用 Python 标准库，会校验 ARMv7 硬浮点静态可执行文件，生成 `dist/kpw4-dashboard.zip` 并输出 SHA-256。可用 `--binary` 和 `--output-dir` 指定其他路径。
 
 本次 Windows 构建使用 Rust 1.100.0 的 GNU 主机工具链、MinGW GCC 和 Rust 随附的 `rust-lld`。HTTPS 依赖含有 C 源码，也需要能编译 ARMv7 musl 的 C 编译器和归档工具。如果 Zig 在 Windows 上无法链接，可在工具均已加入 PATH 的 PowerShell 中使用以下命令。将 `CC`、`AR` 的值换成对应的交叉工具。
 
@@ -64,7 +80,7 @@ $env:AR_armv7_unknown_linux_musleabihf = 'arm-linux-musleabihf-ar'
 $compat = (New-Item -ItemType Directory -Force 'client/target/musl-compat').FullName
 ar cr "$compat/libdl.a"
 cargo rustc --manifest-path client/Cargo.toml --locked --release --target armv7-unknown-linux-musleabihf -- -L "native=$compat"
-./tools/package.ps1
+python tools/package.py
 ```
 
 musl 的 `dl*` 符号在 `libc` 中，空的 `libdl.a` 用于解析依赖声明里的 `-ldl`。

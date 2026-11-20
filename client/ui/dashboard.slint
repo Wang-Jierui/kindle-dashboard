@@ -141,7 +141,13 @@ export component Dashboard inherits Window {
     callback toggle-wifi;
     callback reconnect-wifi;
     callback toggle-auto-sleep;
-    callback adjust-idle(int);
+    callback edit-idle;
+    callback type-idle-key(string);
+    callback save-idle;
+    callback edit-cron;
+    callback type-cron-key(string);
+    callback preview-cron;
+    callback save-cron;
     callback select-wake-plan(int);
     callback toggle-quiet-hours;
     callback sleep-now;
@@ -163,7 +169,17 @@ export component Dashboard inherits Window {
     in property <bool> sleep-settings-available;
     in property <bool> sleep-now-available;
     in property <bool> auto-sleep;
-    in property <int> idle-seconds: 25;
+    in property <string> idle-label: "0 分 25 秒";
+    in-out property <bool> idle-editor-open;
+    in-out property <bool> idle-edit-seconds;
+    in-out property <bool> idle-replace-field;
+    in-out property <string> idle-minutes-draft;
+    in-out property <string> idle-seconds-draft;
+    in property <string> idle-feedback;
+    in-out property <bool> cron-editor-open;
+    in property <string> cron-expression-draft;
+    in property <string> cron-preview;
+    in property <string> cron-feedback;
     in property <int> wake-plan: 1;
     in property <string> wake-label: "每 30 分钟";
     in property <bool> quiet-hours;
@@ -215,10 +231,16 @@ export component Dashboard inherits Window {
                         vertical-alignment: center;
                     }
                 }
-                if !root.standby: PanelButton {
+                if !root.standby: SettingButton {
+                    label: root.loading-content ? "更新中…" : "更新";
+                    width: 100px;
+                    latched: root.loading-content;
+                    accepts-input: !root.loading-content;
+                    clicked => { root.refresh-due(); }
+                }
+                if !root.standby: SettingButton {
                     label: "设置";
-                    label-font: "Noto Sans SC";
-                    width: 126px;
+                    width: 100px;
                     clicked => {
                         root.settings-open = true;
                         root.server-editor-open = false;
@@ -346,7 +368,114 @@ export component Dashboard inherits Window {
             }
         }
 
-        if root.settings-open && !root.server-editor-open: VerticalLayout {
+        if root.settings-open && root.idle-editor-open: VerticalLayout {
+            spacing: 15px;
+            SettingTitle { text: "闲置休眠时长"; font-size: 44px; }
+            Rectangle { height: 2px; background: #000; }
+            HorizontalLayout {
+                spacing: 12px;
+                SettingButton {
+                    label: "分钟 · " + (root.idle-minutes-draft == "" ? "—" : root.idle-minutes-draft);
+                    latched: !root.idle-edit-seconds;
+                    clicked => {
+                        root.idle-edit-seconds = false;
+                        root.idle-replace-field = true;
+                    }
+                }
+                SettingButton {
+                    label: "秒 · " + (root.idle-seconds-draft == "" ? "—" : root.idle-seconds-draft);
+                    latched: root.idle-edit-seconds;
+                    clicked => {
+                        root.idle-edit-seconds = true;
+                        root.idle-replace-field = true;
+                    }
+                }
+            }
+            for row in [["1", "2", "3"], ["4", "5", "6"], ["7", "8", "9"]]: HorizontalLayout {
+                spacing: 12px;
+                for digit in row: PanelButton {
+                    label: digit;
+                    clicked => { root.type-idle-key(digit); }
+                }
+            }
+            HorizontalLayout {
+                spacing: 12px;
+                Rectangle { horizontal-stretch: 1; }
+                PanelButton {
+                    label: "0";
+                    horizontal-stretch: 1;
+                    clicked => { root.type-idle-key("0"); }
+                }
+                SettingButton {
+                    label: "退格";
+                    horizontal-stretch: 1;
+                    clicked => { root.type-idle-key("backspace"); }
+                }
+            }
+            if root.idle-feedback != "": SettingDetail { text: root.idle-feedback; }
+            Rectangle { vertical-stretch: 1; }
+            SettingButton {
+                label: "保存时长";
+                primary: true;
+                clicked => { root.save-idle(); }
+            }
+            SettingButton {
+                label: "取消";
+                clicked => { root.idle-editor-open = false; }
+            }
+        }
+
+        if root.settings-open && root.cron-editor-open: VerticalLayout {
+            spacing: 12px;
+            SettingTitle { text: "自定义唤醒计划"; font-size: 44px; }
+            Rectangle { height: 2px; background: #000; }
+            SettingDetail { text: "分钟 小时 日 月 星期 · 多条规则用 ; 分隔"; }
+            Rectangle {
+                border-width: 2px;
+                border-color: #000;
+                height: 126px;
+                SettingDetail {
+                    x: 12px;
+                    y: 8px;
+                    width: parent.width - 24px;
+                    height: parent.height - 16px;
+                    text: root.cron-expression-draft == "" ? "例如 10 * * * *" : root.cron-expression-draft;
+                    overflow: elide;
+                }
+            }
+            HorizontalLayout {
+                spacing: 7px;
+                for digit in ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"]: PanelButton {
+                    label: digit;
+                    clicked => { root.type-cron-key(digit); }
+                }
+            }
+            HorizontalLayout {
+                spacing: 7px;
+                for key in ["*", ",", "-", "/", ";"]: PanelButton {
+                    label: key;
+                    clicked => { root.type-cron-key(key); }
+                }
+                SettingButton { label: "空格"; clicked => { root.type-cron-key(" "); } }
+                SettingButton { label: "退格"; clicked => { root.type-cron-key("backspace"); } }
+                SettingButton { label: "清空"; clicked => { root.type-cron-key("clear"); } }
+            }
+            if root.cron-feedback != "": SettingDetail { text: root.cron-feedback; }
+            if root.cron-preview != "": VerticalLayout {
+                spacing: 6px;
+                SettingTitle { text: "接下来三次 · Kindle 本地时间"; }
+                SettingDetail { text: root.cron-preview; }
+            }
+            Rectangle { vertical-stretch: 1; }
+            HorizontalLayout {
+                spacing: 12px;
+                SettingButton { label: "预览"; clicked => { root.preview-cron(); } }
+                SettingButton { label: "保存计划"; primary: true; clicked => { root.save-cron(); } }
+            }
+            SettingButton { label: "取消"; clicked => { root.cron-editor-open = false; } }
+        }
+
+        if root.settings-open && !root.server-editor-open && !root.idle-editor-open && !root.cron-editor-open: VerticalLayout {
             spacing: 12px;
             SettingTitle { text: "设置"; font-size: 52px; }
             Rectangle { height: 2px; background: #000; }
@@ -417,26 +546,10 @@ export component Dashboard inherits Window {
                         clicked => { root.sleep-now(); }
                     }
                 }
-                HorizontalLayout {
-                    spacing: 12px;
-                    PanelButton {
-                        label: "−";
-                        width: 80px;
-                        accepts-input: !root.exiting && root.idle-seconds > 15;
-                        clicked => { root.adjust-idle(-5); }
-                    }
-                    SettingDetail {
-                        text: "闲置等待 · " + root.idle-seconds + " 秒";
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                        horizontal-stretch: 1;
-                    }
-                    PanelButton {
-                        label: "+";
-                        width: 80px;
-                        accepts-input: !root.exiting && root.idle-seconds < 120;
-                        clicked => { root.adjust-idle(5); }
-                    }
+                SettingButton {
+                    label: "闲置休眠 · " + root.idle-label;
+                    accepts-input: !root.exiting;
+                    clicked => { root.edit-idle(); }
                 }
                 SettingDetail { text: "唤醒计划 · " + root.wake-label; }
                 HorizontalLayout {
@@ -447,6 +560,12 @@ export component Dashboard inherits Window {
                         accepts-input: !root.exiting && root.wake-plan != index;
                         clicked => { root.select-wake-plan(index); }
                     }
+                }
+                SettingButton {
+                    label: "自定义 Cron";
+                    latched: root.wake-plan == 4;
+                    accepts-input: !root.exiting;
+                    clicked => { root.edit-cron(); }
                 }
                 SettingButton {
                     label: root.quiet-hours ? "夜间免打扰 00:00–07:00：开" : "夜间免打扰 00:00–07:00：关";

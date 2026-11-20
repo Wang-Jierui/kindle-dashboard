@@ -2,6 +2,12 @@
 
 此版本从原生书库启动 Slint，拉取并渲染局域网服务端发布的信息页。配置过 RTC 和供电属性的设备可以启用面板内自动休眠。完整设计见 [v0.1 规格](client-state-spec.md)。
 
+## 许可证
+
+- Kindle 客户端的原创代码和 `device/` 下的设备脚本使用 [GPL-3.0-only](LICENSE)，即仅 GNU GPL 第 3 版。分发 Kindle 客户端安装包时，请提供许可证文本和该版本的完整对应源码获取方式，包括构建与安装所需的脚本。
+- 独立的 Python 服务端使用 [MIT](server/LICENSE)。
+- `client/vendor/slint-backend-kindle/` 保留上游的 [MIT](client/vendor/slint-backend-kindle/LICENSE-MIT) 或 [Apache-2.0](client/vendor/slint-backend-kindle/LICENSE-APACHE) 双重授权。随客户端提供的 Atkinson Hyperlegible 和 Noto Sans SC 字体保留各自的 SIL OFL 1.1 声明，见 [Atkinson Hyperlegible](client/assets/OFL.txt) 和 [Noto Sans SC](client/assets/NotoSansSC-OFL.txt)。
+
 ## 局域网信息页
 
 服务端只需要 Python 3。在项目目录运行以下命令，把示例发布到本地，再用电脑或服务器的局域网 IPv4 启动服务。

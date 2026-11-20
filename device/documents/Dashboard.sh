@@ -1,6 +1,7 @@
 #!/bin/sh
 # Name: Kindle Dashboard
 # Author: Dashboard
+# Icon: /mnt/us/kindle-dashboard/library-cover.png
 # DontUseFBInk
 
 root=/mnt/us/kindle-dashboard

@@ -85,7 +85,7 @@ python tools/package.py
 
 musl 的 `dl*` 符号在 `libc` 中，空的 `libdl.a` 用于解析依赖声明里的 `-ldl`。
 
-将 `dist/kpw4-dashboard.zip` 中的 `documents/` 和 `kindle-dashboard/` 合并复制到 Kindle USB 存储的根目录。弹出 USB 存储后拔线，在原生书库中打开 **Kindle Dashboard**。Scriptlet 支持依赖固件上的脚本集成。面板固有文字使用随包分发的 Atkinson Hyperlegible 字体。
+将 `dist/kpw4-dashboard.zip` 中的 `documents/` 和 `kindle-dashboard/` 合并复制到 Kindle USB 存储的根目录。弹出 USB 存储后拔线，在原生书库中打开 **Kindle Dashboard**。书库网格中的封面由 SH Integration 读取，启动脚本和 `kindle-dashboard/library-cover.png` 需一起复制。面板固有文字使用随包分发的 Atkinson Hyperlegible 字体。
 
 KPW4 5.18.1 保留原生书库进程运行。启动器短暂暂停窗口管理器，保存原生帧缓冲，并让 Slint 后端独占触摸。退出或崩溃后恢复画面、窗口管理器和原生弹窗，再确认书库在前台且没有模态弹窗。启动器在 `/var/tmp` 或 `/dev/shm` 中选择可执行的 tmpfs，并在那里保存程序副本和恢复记录。本阶段请避免在应用运行期间插电脑 USB 数据线。
 

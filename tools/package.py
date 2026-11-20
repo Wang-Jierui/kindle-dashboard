@@ -56,6 +56,8 @@ def package(binary, output_dir):
             for script in sorted(device.rglob("*.sh")):
                 name = script.relative_to(device).as_posix()
                 add(archive, name, script.read_bytes().replace(b"\r\n", b"\n"), executable=True)
+            cover = "kindle-dashboard/library-cover.png"
+            add(archive, cover, (device / cover).read_bytes())
             add(archive, "kindle-dashboard/kindle-dashboard", data, executable=True)
             for name, path in licenses.items():
                 add(archive, "kindle-dashboard/" + name, path.read_bytes().replace(b"\r\n", b"\n"))

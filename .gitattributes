@@ -1,1 +1,10 @@
 *.sh text eol=lf
+
+# Exclude documentation and its diagram artifacts from GitHub language statistics.
+*.md linguist-documentation
+LICENSE linguist-documentation
+LICENSE-* linguist-documentation
+client/assets/*OFL.txt linguist-documentation
+/client-state.html linguist-documentation
+/client-state.lifecycle.json linguist-documentation
+/client-state.visual-check.json linguist-documentation
